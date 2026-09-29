@@ -1,0 +1,7 @@
+node_modules/
+.npm-cache/
+dist/
+dist-release/
+.release-build/
+.test-tmp/
+raycast-env.d.ts

@@ -1,0 +1,24 @@
+# Explicit resident helper service
+
+The argv interface is separate from the existing bounded stdin protocol. `execute` on stdin remains disabled and never posts input.
+
+```
+appbind-helper service-start --directory /absolute/private/support
+appbind-helper service-status --directory /absolute/private/support
+appbind-helper service-reload --directory /absolute/private/support
+appbind-helper service-stop --directory /absolute/private/support
+```
+
+Each command emits one JSON line: `{ "ok": true, "data": { "running": false, "executionEnabled": false, "accessibilityTrusted": false, "inputMonitoringTrusted": false, "enabledBindings": 0, "configDigest": null, "lastError": null, "pid": null } }`, or `{ "ok": false, "error": { "code": "...", "message": "..." } }`. No login item is installed. `service-run` is an internal child-process entry; it expires after seven seconds without a controller commit. Startup failure terminates only the exact Process child, never a PID file. A failed initial commit response stops the child. As with any local IPC, losing the controller after a successfully delivered commit response is not an atomic distributed transaction.
+
+The support directory must be owned by the current UID and mode 0700; ancestors must be root/current-user owned, not group/world writable, and contain no symbolic links. Config must be a same-UID, single-link regular file, not group/world writable, at most 1 MiB. It is read via directory-relative no-follow descriptors. SHA256 covers original bytes, including whitespace/newlines. Reload clears rules and digest before reading: an invalid replacement cannot leave old rules active. A secure exclusive flock controls socket creation; same-UID peer credentials are checked both ways. Socket mode is 0600. Directory-relative Unix addresses avoid macOS sun_path length limits for long Raycast support paths. IPC requests/replies are bounded, with a one-second whole-message read deadline; the daemon pumps its run loop while waiting and nonblocking replies cannot block event handling.
+
+A start with unavailable permissions remains running but execution-disabled. No permission prompt is made. Permissions and Secure Input are rechecked; a loss/disabled tap pauses execution, requiring explicit reload/restart. `executionEnabled` describes the service gate, not a promise that any particular app is supported. Status is not proof a pending click will succeed.
+
+The tap pairs swallowed down/repeat/up, matches the active ASCII-capable keyboard layout just like recording, rechecks foreground PID/bundle, and queues at most one worker. AX calls are off the tap callback. A trigger snapshots the frontmost normal CG window ID, and a delayed worker (>250 ms) refuses. The worker waits up to two seconds for trigger/modifier release, repeatedly checks the same AX focused window and PID, standard/nonmodal/nonminimized attributes, sheets, geometry and half-open display/window containment. System-wide AX hit testing must identify the same PID/window and CG front-to-back ordering must prove the point is unobscured.
+
+**Compatibility is deliberately conservative:** when `AXWindowNumber` is present it must match the trigger CG ID. When absent, the focused window must be the unique exact-frame match in the application's bounded AX window list, and the unique visible normal same-PID exact-frame match in the CG list must have the trigger ID. AX hit-test ownership, CFEqual identity across stages and CG occlusion checks still apply. Invalid present IDs never fall back. This is a constrained identity inference, not an OS-provided AX/CG identity guarantee; ambiguous or unavailable metadata is refused. This is not all-app support. WindowServer/app state and posted events cannot be made absolutely atomic; checks reduce but cannot eliminate the final external state-change interval.
+
+Real key/mouse interference, app changes, config reload, permissions loss and stop invalidate the execution token. Matched trigger releases are not treated as interference; additional modifier presses are. Paired left down/up and optional restoration share a cancellation lock: once stop/reload cancellation has returned, the old worker cannot post. Restoration is conditional on no recorded interference, unchanged expected cursor position, and current permissions/foreground. No activation, raising, or real dragging is performed. Stop gives owned swallowed keys a 500 ms drain window, then exits: indefinite held keys, permission revocation, tap disable, forced termination, or process failure cannot guarantee delivery pairing. No compensating synthetic keyboard events are sent.
+
+Validation uses Swift unit tests and filesystem-only temporary fixtures, not a real daemon, event listener, AX-driven click, or permission prompt. Live macOS behavior is intentionally untested in this implementation session.

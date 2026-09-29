@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "bindings": [
+    {
+      "id": "toggle-sidebar",
+      "name": "打开侧边栏（示例，请修改 Bundle ID）",
+      "enabled": true,
+      "application": { "bundleId": "com.example.app" },
+      "trigger": {
+        "type": "hotkey",
+        "key": "k",
+        "modifiers": ["control", "option"],
+        "scope": "frontmost-app"
+      },
+      "action": {
+        "type": "window-relative-click",
+        "window": "focused",
+        "anchor": "top-right",
+        "offset": { "x": -42, "y": 76 },
+        "button": "left",
+        "restoreCursor": true
+      }
+    }
+  ]
+}

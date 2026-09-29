@@ -1,0 +1,8 @@
+.DS_Store
+helper/.build/
+helper/.cache/
+helper/.swiftpm/
+raycast/node_modules/
+raycast/.npm-cache/
+raycast/dist/
+raycast/.test-build/
