@@ -4,4 +4,5 @@ dist/
 dist-release/
 .release-build/
 .test-tmp/
+assets/archives/
 raycast-env.d.ts
