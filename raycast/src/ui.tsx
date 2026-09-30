@@ -2,6 +2,7 @@ import { Action, ActionPanel, Form, Icon, Toast, closeMainWindow, environment, g
 import { useEffect, useRef, useState } from "react";
 import { getFrontmostApplication } from "@raycast/api";
 import { resolveActiveApplication } from "./active-app";
+import { resolveAppPath, appNameFromPath, ResolvedApp } from "./app-icon";
 import { logDebug } from "./debug-log";
 import { Anchor, Binding, Config, anchors, round2 } from "./config";
 import { findShortcutConflict, formatShortcut } from "./shortcut";
@@ -17,6 +18,12 @@ export function BindingForm({ binding, saved }: { binding?: Binding; saved?: (co
   const { pop, push } = useNavigation(); const [busy, setBusy] = useState(false); const [error, setError] = useState<string>();
   const [bundleId, setBundleId] = useState(binding?.application.bundleId ?? "");
   const [appError, setAppError] = useState<string>();
+  // 已识别应用的信息（名称/路径），用于展示该 appid 对应的 logo；按 id 单独反查，
+  // 不使用 getApplications()（全量枚举会污染前台查询缓存）。
+  const [appInfo, setAppInfo] = useState<ResolvedApp | undefined>();
+  const [logoLoading, setLogoLoading] = useState(false);
+  const appLookupSeq = useRef(0);
+  const appLookupTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [detecting, setDetecting] = useState(false);
   const [anchor, setAnchor] = useState<Anchor>(binding?.action.anchor ?? "top-left");
   const [x, setX] = useState((binding?.action.offset.x ?? 0).toFixed(2));
@@ -24,9 +31,30 @@ export function BindingForm({ binding, saved }: { binding?: Binding; saved?: (co
   const [capturing, setCapturing] = useState(false);
   const [shortcut, setShortcut] = useState<ShortcutData | undefined>(binding ? { key: binding.trigger.key, modifiers: [...binding.trigger.modifiers] } : undefined);
   const [shortcutError, setShortcutError] = useState<string>();
+  /** appid 字段形态：dropdown（内联显示解析到的应用 logo）或 manual（手动输入 Bundle ID）。 */
+  const [appMode, setAppMode] = useState<"dropdown" | "manual">("dropdown");
   const interactiveSession = useRef(false);
   const mounted = useRef(true);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; if (appLookupTimer.current !== undefined) clearTimeout(appLookupTimer.current); }; }, []);
+  /** 先拿到 appid，再查这个 id 对应的应用路径（logo）：mdfind → lsappinfo，都不命中则无图标。 */
+  function refreshAppInfo(id: string) {
+    const seq = ++appLookupSeq.current;
+    setAppInfo(undefined);
+    setLogoLoading(true);
+    if (!id.trim()) { setLogoLoading(false); return; }
+    void resolveAppPath(id).then(path => {
+      if (!mounted.current || seq !== appLookupSeq.current) return;
+      setLogoLoading(false);
+      if (!path) { setAppInfo(undefined); return; }
+      setAppInfo({ name: appNameFromPath(path, id), path });
+    });
+  }
+  /** 手动输入 Bundle ID 时防抖反查 logo。 */
+  function scheduleAppInfo(id: string) {
+    if (appLookupTimer.current !== undefined) clearTimeout(appLookupTimer.current);
+    if (!id.trim()) { setAppInfo(undefined); return; }
+    appLookupTimer.current = setTimeout(() => { appLookupTimer.current = undefined; void refreshAppInfo(id); }, 350);
+  }
   function recordShortcut() {
     if (busy || detecting || interactiveSession.current) return;
     push(<ShortcutPicker current={shortcut} onConfirm={async (candidate, isActive) => {
@@ -48,13 +76,15 @@ export function BindingForm({ binding, saved }: { binding?: Binding; saved?: (co
       if (request !== generation.current) return;
       setBundleId(app.bundleId);
       setAppError(undefined);
+      refreshAppInfo(app.bundleId);
     } catch (e) {
       await logDebug("detectApp", `failure: ${e instanceof Error ? e.message : String(e)}`);
       if (request === generation.current) setAppError(message(e));
     } finally { if (request === generation.current) setDetecting(false); }
   }
   useEffect(() => {
-    if (!binding) void detectApplication();
+    if (binding) refreshAppInfo(binding.application.bundleId);
+    else void detectApplication();
     return () => { generation.current++; };
   }, []);
   async function pickPoint() {
@@ -124,6 +154,9 @@ export function BindingForm({ binding, saved }: { binding?: Binding; saved?: (co
         <Action title="设置快捷键" icon={Icon.Keyboard} onAction={recordShortcut} />
         <Action title="从窗口取点" icon={Icon.TextCursor} onAction={pickPoint} />
         <Action title="重新检测前台 App" icon={Icon.RotateClockwise} onAction={() => { if (busy || interactiveSession.current) return; void detectApplication(); }} />
+        {/* 手动输入模式下回到图标视图（仅当已有合法 Bundle ID 时）。 */}
+        {appMode === "manual" && bundleId.trim() !== "" && <Action title="以图标视图查看应用" icon={Icon.AppWindow} onAction={() => setAppMode("dropdown")} />}
+        <Action icon={appInfo ? { fileIcon: appInfo.path } : Icon.QuestionMark} title={appInfo ? `应用：${appInfo.name}` : "未识别该 App 的图标"} onAction={async () => { await showToast({ style: Toast.Style.Success, title: appInfo ? `${appInfo.name} · ${appInfo.path}` : "该 App 未安装或不在 Spotlight 索引中", }); }} />
       </ActionPanel.Section>
       <ActionPanel.Section>
         <Action.SubmitForm title="保存" shortcut={binding ? { modifiers: ["cmd"], key: "s" } : undefined} onSubmit={submit} />
@@ -132,7 +165,22 @@ export function BindingForm({ binding, saved }: { binding?: Binding; saved?: (co
     {error && <Form.Description title="Result" text={error} />}
     {binding ? <Form.Description title="ID (immutable)" text={binding.id} /> : <Form.TextField id="id" title="ID" placeholder="toggle-sidebar" />}
     <Form.TextField id="name" title="Name" defaultValue={binding?.name} />
-    <Form.TextField id="bundleId" title="App Bundle ID" placeholder="自动从激活应用获取，也可手动修改" value={bundleId} error={appError} onChange={value => { generation.current++; setDetecting(false); setBundleId(value); setAppError(undefined); }} />
+    {appMode === "manual"
+      ? <Form.TextField id="bundleId" title="App Bundle ID" placeholder="自动从激活应用获取，也可手动修改" value={bundleId} error={appError} onChange={value => { generation.current++; setDetecting(false); setBundleId(value); setAppError(undefined); scheduleAppInfo(value); }} />
+      : <Form.Dropdown id="app" title="应用" value={bundleId || "__empty__"} info="字段内显示当前 appid 解析出的应用与 logo；点击「重新检测前台 App」可重新获取前台应用。" onChange={value => {
+        generation.current++; setDetecting(false); setAppError(undefined);
+        if (value === "__manual__") { setAppMode("manual"); return; }
+        if (value === "__empty__") return;
+        setBundleId(value); scheduleAppInfo(value);
+      }}>
+        {/* 只有当前 bundleId 对应的项：受控值永远有匹配项，不可能回退成其他 App。 */}
+        {!bundleId && <Form.Dropdown.Item value="__empty__" title="尚未获取 App ID：点击「重新检测前台 App」或手动输入" icon={Icon.QuestionMark} />}
+        {bundleId && appInfo && <Form.Dropdown.Item value={bundleId} title={`${appInfo.name}（${bundleId}）`} icon={{ fileIcon: appInfo.path }} />}
+        {bundleId && !appInfo && <Form.Dropdown.Item value={bundleId} title={logoLoading ? "正在查询该 App 的 logo…" : `${bundleId}（未找到图标）`} icon={Icon.QuestionMark} />}
+        <Form.Dropdown.Item value="__manual__" title="手动输入 Bundle ID…" icon={Icon.Pencil} />
+      </Form.Dropdown>}
+    {bundleId.trim() !== "" && <Form.Description title="已识别应用" text={appInfo ? `${appInfo.name} · ${appInfo.path}` : (logoLoading ? "正在查询该 App 的 logo…" : "未找到该 App 的图标（未安装或不在本地索引中）；规则仍可保存")} />}
+    {appError && appMode === "dropdown" && <Form.Description title="前台检测提示" text={appError} />}
     <Form.Description title="快捷键" text={shortcut ? formatShortcut(shortcut) : "尚未设置"} />
     {shortcutError && <Form.Description title="快捷键提示" text={shortcutError} />}
     <Form.Dropdown id="anchor" title="Anchor" value={anchor} onChange={value => setAnchor(value as Anchor)}>{anchors.map(a => <Form.Dropdown.Item key={a} value={a} title={a} />)}</Form.Dropdown>
