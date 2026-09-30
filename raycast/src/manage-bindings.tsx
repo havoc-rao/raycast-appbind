@@ -5,16 +5,8 @@ import { BindingForm, failure, message, store } from "./ui";
 import { BindingDebugActions } from "./debug-actions";
 import BackgroundService from "./background-service";
 import { notifyConfigurationSaved } from "./service";
-import { AppInfo, installedApps } from "./apps";
 export default function ManageBindings() {
   const [config, setConfig] = useState<Config>(); const [error, setError] = useState<string>(); const [loading, setLoading] = useState(true);
-  const [appByBundle, setAppByBundle] = useState<Record<string, AppInfo>>({});
-  useEffect(() => {
-    void installedApps()
-      .then(apps => { const map: Record<string, AppInfo> = {}; for (const app of apps) map[app.bundleId] = app; setAppByBundle(map); })
-      .catch(() => {});
-  }, []);
-  const findApp = (bundleId: string) => appByBundle[bundleId] ?? Object.values(appByBundle).find(a => a.bundleId.toLowerCase() === bundleId.toLowerCase());
   async function load() { setLoading(true); try { setConfig(await store.read()); setError(undefined); } catch (e) { setConfig(undefined); setError(message(e)); } finally { setLoading(false); } }
   useEffect(() => { void load(); }, []);
   async function change(binding: Binding, remove: boolean) {
@@ -31,12 +23,12 @@ export default function ManageBindings() {
   const common = <><Action.Push title="Create Binding" icon={Icon.Plus} target={<BindingForm saved={setConfig} />} /><Action title="Reload Configuration" icon={Icon.ArrowClockwise} onAction={load} /><Action.Push title="后台服务" target={<BackgroundService />} /></>;
   return <List isLoading={loading} searchBarPlaceholder="搜索规则或应用" actions={<ActionPanel>{common}</ActionPanel>}>
     {error ? <List.EmptyView title="Configuration unavailable — not reset" description={error} /> : !config?.bindings.length ? <List.EmptyView title="No binding definitions" description="创建规则后，在后台服务页面显式启动监听。" /> : <List.Section title="已保存规则" subtitle="启用标记不等于服务正在运行；请查看后台服务">
-      {config.bindings.map(b => { const app = findApp(b.application.bundleId); return <List.Item key={b.id} title={b.name} subtitle={app ? `${app.name} · ${b.application.bundleId}` : b.application.bundleId} keywords={[b.id, b.trigger.key, app?.name ?? ""]} icon={app ? { fileIcon: app.path } : Icon.QuestionMark} accessories={[{ text: [...b.trigger.modifiers, b.trigger.key].join("+") }, { icon: b.enabled ? Icon.CheckCircle : Icon.Circle, tooltip: b.enabled ? "Enabled" : "Disabled" }, { text: b.enabled ? "Enabled" : "Disabled" }]} actions={<ActionPanel>
+      {config.bindings.map(b => <List.Item key={b.id} title={b.name} subtitle={b.application.bundleId} keywords={[b.id, b.trigger.key]} icon={b.enabled ? Icon.CheckCircle : Icon.Circle} accessories={[{ text: [...b.trigger.modifiers, b.trigger.key].join("+") }, { text: b.enabled ? "Enabled" : "Disabled" }]} actions={<ActionPanel>
         <Action.Push title="Edit Binding" target={<BindingForm binding={b} saved={setConfig} />} />
         <Action title={b.enabled ? "Disable Binding" : "Enable Binding"} onAction={() => change(b, false)} />
         <BindingDebugActions config={config} bindingId={b.id} />
         <Action title="Delete Binding" style={Action.Style.Destructive} onAction={() => change(b, true)} />{common}
-      </ActionPanel>} />; })}
+      </ActionPanel>} />)}
     </List.Section>}
   </List>;
 }
