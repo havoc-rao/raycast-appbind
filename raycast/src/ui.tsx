@@ -1,7 +1,8 @@
 import { Action, ActionPanel, Form, Icon, Toast, closeMainWindow, environment, getPreferenceValues, showToast, useNavigation } from "@raycast/api";
 import { useEffect, useRef, useState } from "react";
 import { getFrontmostApplication } from "@raycast/api";
-import { resolveActiveApplication } from "./active-app";
+import { AppInfo, installedApps } from "./apps";
+import { resolveActiveApplication, ActiveApplication } from "./active-app";
 import { logDebug } from "./debug-log";
 import { Anchor, Binding, Config, anchors, round2 } from "./config";
 import { findShortcutConflict, formatShortcut } from "./shortcut";
@@ -12,11 +13,17 @@ import { CaptureData, ShortcutData, callHelper } from "./transport";
 export const store = new ConfigStore(environment.supportPath);
 export const message = (e: unknown) => e instanceof Error ? e.message : String(e);
 export async function failure(e: unknown) { await showToast({ style: Toast.Style.Failure, title: "AppBind refused operation", message: message(e) }); }
+/** Keep the auto-detect loading state visible long enough to be perceivable. */
+const DETECT_MIN_MS = 750;
 interface Values { id: string; name: string; enabled: boolean }
 export function BindingForm({ binding, saved }: { binding?: Binding; saved?: (config: Config) => void }) {
   const { pop, push } = useNavigation(); const [busy, setBusy] = useState(false); const [error, setError] = useState<string>();
   const [bundleId, setBundleId] = useState(binding?.application.bundleId ?? "");
   const [appError, setAppError] = useState<string>();
+  const [appInfo, setAppInfo] = useState<AppInfo>();
+  const [installed, setInstalled] = useState<AppInfo[]>([]);
+  const [appMode, setAppMode] = useState<"dropdown" | "manual">("dropdown");
+  const appLookup = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [detecting, setDetecting] = useState(false);
   const [anchor, setAnchor] = useState<Anchor>(binding?.action.anchor ?? "top-left");
   const [x, setX] = useState((binding?.action.offset.x ?? 0).toFixed(2));
@@ -26,7 +33,38 @@ export function BindingForm({ binding, saved }: { binding?: Binding; saved?: (co
   const [shortcutError, setShortcutError] = useState<string>();
   const interactiveSession = useRef(false);
   const mounted = useRef(true);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  // One shared enumeration of installed apps, awaited by both the Logo dropdown and auto-detection.
+  const installedPromise = useRef<Promise<AppInfo[]> | undefined>(undefined);
+  if (!installedPromise.current) installedPromise.current = installedApps().then(list => list, () => []);
+  useEffect(() => {
+    mounted.current = true;
+    void installedPromise.current!.then(setInstalled);
+    return () => { mounted.current = false; if (appLookup.current !== undefined) clearTimeout(appLookup.current); };
+  }, []);
+  // Animated ellipsis while auto-detection is in progress.
+  const [dots, setDots] = useState(1);
+  useEffect(() => {
+    if (!detecting) { setDots(1); return; }
+    const timer = setInterval(() => setDots(d => (d % 3) + 1), 300);
+    return () => clearInterval(timer);
+  }, [detecting]);
+  /** Debounced lookup of the installed app matching a bundle id, for the "已识别应用" hint. */
+  function scheduleAppLookup(id: string) {
+    if (appLookup.current !== undefined) clearTimeout(appLookup.current);
+    if (!id.trim()) { setAppInfo(undefined); return; }
+    appLookup.current = setTimeout(() => {
+      appLookup.current = undefined;
+      void installedApps()
+        .then(list => {
+          const needle = id.trim();
+          const match = list.find(app => app.bundleId === needle)
+            ?? list.find(app => app.bundleId.toLowerCase() === needle.toLowerCase());
+          if (match !== undefined) setAppInfo({ name: match.name, path: match.path, bundleId: match.bundleId });
+          else setAppInfo(undefined);
+        })
+        .catch(() => setAppInfo(undefined));
+    }, 350);
+  }
   function recordShortcut() {
     if (busy || detecting || interactiveSession.current) return;
     push(<ShortcutPicker current={shortcut} onConfirm={async (candidate, isActive) => {
@@ -41,18 +79,42 @@ export function BindingForm({ binding, saved }: { binding?: Binding; saved?: (co
   const generation = useRef(0);
   async function detectApplication() {
     const request = ++generation.current;
+    const startedAt = Date.now();
     setDetecting(true);
+    let resolved: ActiveApplication | undefined;
+    let detectError: string | undefined;
     try {
-      const app = await resolveActiveApplication(getFrontmostApplication);
-      await logDebug("detectApp", `resolved ${app.bundleId} name="${app.name}"`);
-      if (request !== generation.current) return;
-      setBundleId(app.bundleId);
-      setAppError(undefined);
+      resolved = await resolveActiveApplication(getFrontmostApplication);
+      await logDebug("detectApp", `resolved ${resolved.bundleId} name="${resolved.name}"`);
     } catch (e) {
       await logDebug("detectApp", `failure: ${e instanceof Error ? e.message : String(e)}`);
-      if (request === generation.current) setAppError(message(e));
-    } finally { if (request === generation.current) setDetecting(false); }
+      detectError = message(e);
+    }
+    // Keep the loading animation visible for at least DETECT_MIN_MS before anything appears.
+    const remain = DETECT_MIN_MS - (Date.now() - startedAt);
+    if (remain > 0) await new Promise(resolve => setTimeout(resolve, remain));
+    if (request !== generation.current) return;
+    setDetecting(false);
+    if (detectError !== undefined || resolved === undefined) { setAppMode("manual"); setAppError(detectError ?? "未能获取前台应用"); return; }
+    // Land bundle id and logo atomically: wait for the installed-app list so the dropdown never flashes a wrong value.
+    const list = await installedPromise.current!;
+    if (request !== generation.current) return;
+    const match = list.find(app => app.bundleId === resolved!.bundleId) ?? list.find(app => app.bundleId.toLowerCase() === resolved!.bundleId.toLowerCase());
+    setBundleId(resolved!.bundleId);
+    setAppInfo(match ? { name: match.name, path: match.path, bundleId: match.bundleId } : undefined);
+    setAppMode("dropdown");
+    setAppError(undefined);
   }
+  const editResolved = useRef(false);
+  useEffect(() => {
+    if (binding && installed.length > 0 && !editResolved.current) {
+      editResolved.current = true;
+      const needle = binding.application.bundleId;
+      const match = installed.find(a => a.bundleId === needle) ?? installed.find(a => a.bundleId.toLowerCase() === needle.toLowerCase());
+      if (match) setAppInfo({ name: match.name, path: match.path, bundleId: match.bundleId });
+      else setAppMode("manual");
+    }
+  }, [binding, installed]);
   useEffect(() => {
     if (!binding) void detectApplication();
     return () => { generation.current++; };
@@ -123,6 +185,8 @@ export function BindingForm({ binding, saved }: { binding?: Binding; saved?: (co
       <ActionPanel.Section>
         <Action title="设置快捷键" icon={Icon.Keyboard} onAction={recordShortcut} />
         <Action title="从窗口取点" icon={Icon.TextCursor} onAction={pickPoint} />
+        <Action title="重新检测前台 App" icon={Icon.RotateClockwise} onAction={() => { if (busy || interactiveSession.current) return; void detectApplication(); }} />
+        <Action title={appMode === "dropdown" ? "手动输入 Bundle ID…" : "以 Logo 列表选择应用…"} icon={appMode === "dropdown" ? Icon.Pencil : appInfo ? { fileIcon: appInfo.path } : Icon.AppWindow} onAction={() => setAppMode(appMode === "dropdown" ? "manual" : "dropdown")} />
       </ActionPanel.Section>
       <ActionPanel.Section>
         <Action.SubmitForm title="保存" shortcut={binding ? { modifiers: ["cmd"], key: "s" } : undefined} onSubmit={submit} />
@@ -131,7 +195,24 @@ export function BindingForm({ binding, saved }: { binding?: Binding; saved?: (co
     {error && <Form.Description title="Result" text={error} />}
     {binding ? <Form.Description title="ID (immutable)" text={binding.id} /> : <Form.TextField id="id" title="ID" placeholder="toggle-sidebar" />}
     <Form.TextField id="name" title="Name" defaultValue={binding?.name} />
-    <Form.TextField id="bundleId" title="App Bundle ID" placeholder="自动从激活应用获取，也可手动修改" value={bundleId} error={appError} onChange={value => { generation.current++; setDetecting(false); setBundleId(value); setAppError(undefined); }} />
+    {appMode === "manual"
+      ? <Form.TextField id="bundleId" title="App Bundle ID" placeholder="自动从激活应用获取，也可手动修改" value={bundleId} error={appError} onChange={value => { generation.current++; setDetecting(false); setBundleId(value); setAppError(undefined); scheduleAppLookup(value); }} />
+      : <Form.Dropdown id="app" title="App (Bundle ID)" value={appInfo?.bundleId ?? (bundleId ? bundleId : "__detecting__")} onChange={value => {
+        generation.current++; setDetecting(false); setAppError(undefined);
+        if (value === "__manual__") { setAppMode("manual"); return; }
+        if (value === "__detecting__") return;
+        setBundleId(value);
+        const app = installed.find(a => a.bundleId === value);
+        if (app) setAppInfo({ name: app.name, path: app.path, bundleId: app.bundleId });
+        else scheduleAppLookup(value);
+      }}>
+        {installed.map(app => <Form.Dropdown.Item key={app.bundleId} value={app.bundleId} title={app.name} keywords={[app.bundleId, "bundle id"]} icon={{ fileIcon: app.path }} />)}
+        {appInfo && !installed.some(a => a.bundleId === appInfo.bundleId) && <Form.Dropdown.Item value={appInfo.bundleId} title={`${appInfo.name}（未安装）`} icon={{ fileIcon: appInfo.path }} />}
+        {!appInfo && bundleId && !installed.some(a => a.bundleId === bundleId) && <Form.Dropdown.Item value={bundleId} title={`${bundleId}（未识别）`} icon={Icon.QuestionMark} />}
+        {!appInfo && (detecting || !bundleId) && <Form.Dropdown.Item value="__detecting__" title={detecting ? `正在检测前台应用${"…".repeat(dots)}` : "正在检测前台应用…"} icon={Icon.MagnifyingGlass} />}
+        <Form.Dropdown.Item value="__manual__" title="手动输入 Bundle ID…" icon={Icon.Pencil} />
+      </Form.Dropdown>}
+    {bundleId.trim() !== "" && <Form.Description title="已识别应用" text={appInfo ? `${appInfo.name} · ${appInfo.path}` : "未在已安装应用中找到；规则仍可保存，运行时会按该 Bundle ID 匹配"} />}
     <Form.Description title="快捷键" text={shortcut ? formatShortcut(shortcut) : "尚未设置"} />
     {shortcutError && <Form.Description title="快捷键提示" text={shortcutError} />}
     <Form.Dropdown id="anchor" title="Anchor" value={anchor} onChange={value => setAnchor(value as Anchor)}>{anchors.map(a => <Form.Dropdown.Item key={a} value={a} title={a} />)}</Form.Dropdown>
