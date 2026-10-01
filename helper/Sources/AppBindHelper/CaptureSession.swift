@@ -544,15 +544,23 @@ final class OverlayView: NSView {
 
     // MARK: - Picked point
 
-    /// Faint full-display hairlines at the picked position for alignment, like a scope.
+    /// Full-display alignment hairlines at the picked position, like a scope. Each
+    /// guide is stroked twice — a dark underlay beneath a bright hairline — so the
+    /// lines stay visible over both light and dark target content (a single faint
+    /// white hairline vanished over light-colored apps).
     private func drawGuides(at p: NSPoint, in full: NSRect) {
-        NSColor.white.withAlphaComponent(0.14).setStroke()
         let guides = NSBezierPath()
-        guides.lineWidth = 1
         guides.move(to: NSPoint(x: full.minX, y: p.y))
         guides.line(to: NSPoint(x: full.maxX, y: p.y))
         guides.move(to: NSPoint(x: p.x, y: full.minY))
         guides.line(to: NSPoint(x: p.x, y: full.maxY))
+
+        NSColor.black.withAlphaComponent(0.45).setStroke()
+        guides.lineWidth = 3
+        guides.stroke()
+
+        NSColor.white.withAlphaComponent(0.85).setStroke()
+        guides.lineWidth = 1
         guides.stroke()
     }
 
@@ -564,7 +572,7 @@ final class OverlayView: NSView {
         let wave = CGFloat(0.5 + 0.5 * sin(phase * 2 * .pi))
 
         // Soft dark underglow keeps the arms readable over bright content.
-        NSColor.black.withAlphaComponent(0.35).setStroke()
+        NSColor.black.withAlphaComponent(0.45).setStroke()
         let glow = NSBezierPath()
         glow.lineWidth = 5
         glow.move(to: NSPoint(x: p.x - 18, y: p.y)); glow.line(to: NSPoint(x: p.x + 18, y: p.y))
@@ -583,14 +591,19 @@ final class OverlayView: NSView {
         cross.move(to: NSPoint(x: p.x, y: p.y + gap)); cross.line(to: NSPoint(x: p.x, y: p.y + arm))
         cross.stroke()
 
-        // Breathing outer ring.
+        // Breathing outer ring, dark underlay first so it reads over light content too.
         let radius = 13 + 1.2 * wave
-        accent.withAlphaComponent(0.35 + 0.45 * wave).setStroke()
         let ring = NSBezierPath(ovalIn: NSRect(x: p.x - radius, y: p.y - radius, width: radius * 2, height: radius * 2))
+        NSColor.black.withAlphaComponent(0.35).setStroke()
+        ring.lineWidth = 3.5
+        ring.stroke()
+        accent.withAlphaComponent(0.35 + 0.45 * wave).setStroke()
         ring.lineWidth = 1.5
         ring.stroke()
 
-        // Center dot.
+        // Center dot on a small dark halo, so it never blends into bright pixels.
+        NSColor.black.withAlphaComponent(0.5).setFill()
+        NSBezierPath(ovalIn: NSRect(x: p.x - 4.5, y: p.y - 4.5, width: 9, height: 9)).fill()
         accent.withAlphaComponent(0.95).setFill()
         NSBezierPath(ovalIn: NSRect(x: p.x - 2.5, y: p.y - 2.5, width: 5, height: 5)).fill()
     }
