@@ -156,10 +156,9 @@ export function BindingForm({ binding, saved }: { binding?: Binding; saved?: (co
         <Action title="重新检测前台 App" icon={Icon.RotateClockwise} onAction={() => { if (busy || interactiveSession.current) return; void detectApplication(); }} />
         {/* 手动输入模式下回到图标视图（仅当已有合法 Bundle ID 时）。 */}
         {appMode === "manual" && bundleId.trim() !== "" && <Action title="以图标视图查看应用" icon={Icon.AppWindow} onAction={() => setAppMode("dropdown")} />}
-        <Action icon={appInfo ? { fileIcon: appInfo.path } : Icon.QuestionMark} title={appInfo ? `应用：${appInfo.name}` : "未识别该 App 的图标"} onAction={async () => { await showToast({ style: Toast.Style.Success, title: appInfo ? `${appInfo.name} · ${appInfo.path}` : "该 App 未安装或不在 Spotlight 索引中", }); }} />
       </ActionPanel.Section>
       <ActionPanel.Section>
-        <Action.SubmitForm title="保存" shortcut={binding ? { modifiers: ["cmd"], key: "s" } : undefined} onSubmit={submit} />
+        <Action.SubmitForm title="保存" shortcut={{ modifiers: ["cmd"], key: "s" }} onSubmit={submit} />
       </ActionPanel.Section>
     </ActionPanel>}>
     {error && <Form.Description title="Result" text={error} />}
