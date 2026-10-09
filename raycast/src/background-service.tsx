@@ -51,7 +51,7 @@ function renderMarkdown(state: ServiceState | undefined, error: string | undefin
   const detail = state.executionEnabled
     ? "正在监听前台 App 与已保存的快捷键,命中后校验通过才会真实点击。"
     : state.running
-      ? "请检查下方权限状态与最近错误;授权后再执行「刷新状态」。"
+      ? "安全输入期间会临时暂停，结束后自动恢复，无需重启。若权限缺失，请授权后「重载已保存的规则」；其他故障请查看暂停原因。「刷新状态」仅查询最新状态。"
       : "可执行「启动后台服务」开始监听;保存规则不会自动启动服务。";
   return `# AppBind 后台服务\n\n${statusBanner(state, error)}${detail}\n\n${lastError}${sections}${refreshed}`;
 }
