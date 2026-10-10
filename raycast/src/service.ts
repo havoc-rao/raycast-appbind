@@ -1,8 +1,24 @@
 import { Alert, Toast, confirmAlert, environment, getPreferenceValues, showToast } from "@raycast/api";
+import { copyFile } from "node:fs/promises";
+import { join } from "node:path";
 import { Config } from "./config";
 import { ServiceCommand, callService, configDigest } from "./service-transport";
 
-export function serviceCommand(command: ServiceCommand) {
+/**
+ * Drop this extension's icon where the helper can find it, so a refused trigger is
+ * reported with the same icon tile Raycast's own HUD uses. Decorative and best-effort:
+ * a failure only means the helper draws its fallback symbol instead.
+ */
+async function syncNoticeIcon(): Promise<void> {
+  try {
+    await copyFile(join(environment.assetsPath, "appbind.png"), join(environment.supportPath, "notice-icon.png"));
+  } catch {
+    /* decorative only */
+  }
+}
+
+export async function serviceCommand(command: ServiceCommand) {
+  if (command === "start") await syncNoticeIcon();
   return callService(getPreferenceValues<{ helperPath: string }>().helperPath, environment.supportPath, command);
 }
 

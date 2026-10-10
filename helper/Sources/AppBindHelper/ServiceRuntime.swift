@@ -38,6 +38,7 @@ final class ServiceRuntime {
     }
     func stop() {
         active = false; cancel(); timer?.invalidate(); timer = nil
+        ExecutionNotice.shared.dismiss()
         // Drain owned key-up/repeats without accepting new triggers. No synthetic
         // key compensation; after this bounded grace period pairing is best effort.
         let deadline = Date().addingTimeInterval(0.5)
@@ -51,6 +52,16 @@ final class ServiceRuntime {
         tap = nil; source = nil
     }
     func cancel() { keys.cancel(); guardState.cancel() }
+    /// A refused trigger is the one failure the user has no other way to see: the target
+    /// app simply does nothing. Record it for the Raycast panel and show the transient
+    /// notice, which is the only feedback available while no extension process is alive.
+    private func refuseTrigger(_ message: String, code: String = "UNSAFE_TARGET") {
+        lastError = message
+        ExecutionNotice.shared.show(code: code, message: message, icon: noticeIcon)
+    }
+    /// Optional decorative asset the Raycast side drops into the support directory; the
+    /// notice falls back to a warning symbol when it is missing or unsafe.
+    private lazy var noticeIcon: NSImage? = directory.optionalAsset("notice-icon.png").flatMap(NSImage.init(data:))
     private var permitted: Bool { AXIsProcessTrusted() && CGPreflightListenEventAccess() && !IsSecureEventInputEnabled() }
     private var enabled: Bool { active && !suspended && !secureInputPaused && digest != nil && tap.map { CGEvent.tapIsEnabled(tap: $0) } == true && permitted }
     func status() -> [String: Any] {
@@ -152,13 +163,19 @@ final class ServiceRuntime {
             guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]],
                   let frontWindow = windows.first(where: { ($0[kCGWindowLayer as String] as? Int) == 0 }),
                   frontWindow[kCGWindowOwnerPID as String] as? Int == Int(foregroundPID),
-                  let triggerWindow = frontWindow[kCGWindowNumber as String] as? Int else { lastError = "Shortcut matched, but the frontmost CG window could not be verified for the target application."; cancel(); return outcome.consume ? nil : Unmanaged.passUnretained(event) }
+                  let triggerWindow = frontWindow[kCGWindowNumber as String] as? Int else { refuseTrigger("Shortcut matched, but the frontmost CG window could not be verified for the target application."); cancel(); return outcome.consume ? nil : Unmanaged.passUnretained(event) }
             busy = true
             let triggeredAt = Date()
             let pid = foregroundPID, token = guardState.token(), guardState = self.guardState
             queue.async { [weak self] in
-                let error = SafeClickExecutor.execute(binding: binding, pid: pid, keyCode: code, triggerWindow: triggerWindow, triggeredAt: triggeredAt, guardState: guardState, token: token)
-                DispatchQueue.main.async { self?.busy = false; self?.keys.finish(); if let error { self?.lastError = error } }
+                let result = SafeClickExecutor.execute(binding: binding, pid: pid, keyCode: code, triggerWindow: triggerWindow, triggeredAt: triggeredAt, guardState: guardState, token: token)
+                DispatchQueue.main.async {
+                    self?.busy = false; self?.keys.finish()
+                    switch result {
+                    case .refused(let failureCode, let message): self?.refuseTrigger(message, code: failureCode)
+                    case .posted(let note): if let note { self?.lastError = note }
+                    }
+                }
             }
         }
         return outcome.consume ? nil : Unmanaged.passUnretained(event)

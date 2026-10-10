@@ -88,4 +88,20 @@ final class ServiceTests: XCTestCase {
             XCTAssertThrowsError(try directory.configuration())
         }
     }
+    func testOptionalAssetIgnoresMissingAndUnsafeShapes() throws {
+        try temporary { path in
+            let directory = try ServiceDirectory(path: path, create: false)
+            XCTAssertNil(directory.optionalAsset("notice-icon.png"))
+            XCTAssertNil(directory.optionalAsset(""))
+            XCTAssertNil(directory.optionalAsset("../config.json"))
+            try Data([1, 2, 3]).write(to: URL(fileURLWithPath: path + "/notice-icon.png"))
+            XCTAssertEqual(directory.optionalAsset("notice-icon.png")?.count, 3)
+            XCTAssertNil(directory.optionalAsset("notice-icon.png", maximum: 2))
+            XCTAssertEqual(chmod(path + "/notice-icon.png", 0o666), 0)
+            XCTAssertNil(directory.optionalAsset("notice-icon.png"))
+            XCTAssertEqual(unlink(path + "/notice-icon.png"), 0)
+            try FileManager.default.createSymbolicLink(atPath: path + "/notice-icon.png", withDestinationPath: path + "/config.json")
+            XCTAssertNil(directory.optionalAsset("notice-icon.png"))
+        }
+    }
 }

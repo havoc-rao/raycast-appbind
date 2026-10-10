@@ -7,7 +7,14 @@ import AppBindCore
 /// Unsupported AX/CG metadata is a refusal, never a reason to weaken validation.
 enum SafeClickExecutor {
     struct Target { let window: AXUIElement; let frame: Rect; let point: Point; let number: Int }
-    static func execute(binding: Binding, pid: pid_t, keyCode: UInt16, triggerWindow: Int, triggeredAt: Date, guardState: ExecutionGuard, token: UInt64) -> String? {
+    /// A refusal posted no input at all, so the trigger is invisible unless the service
+    /// surfaces it. A posted click can only report optional cursor restoration as a note
+    /// and must never be presented to the user as a failure.
+    enum Outcome: Sendable {
+        case refused(code: String, message: String)
+        case posted(note: String?)
+    }
+    static func execute(binding: Binding, pid: pid_t, keyCode: UInt16, triggerWindow: Int, triggeredAt: Date, guardState: ExecutionGuard, token: UInt64) -> Outcome {
         do {
             func live() throws {
                 guard Date().timeIntervalSince(triggeredAt) < 4, guardState.valid(token), AXIsProcessTrusted(), CGPreflightListenEventAccess(), !IsSecureEventInputEnabled() else { throw AppBindError("CANCELLED", "Execution cancelled or permissions unavailable.") }
@@ -46,35 +53,38 @@ enum SafeClickExecutor {
             // Let real-input callbacks invalidate the token before optional restoration.
             Thread.sleep(forTimeInterval: 0.025)
             guard guardState.valid(token), released(keyCode) else {
-                return "Click posted; cursor restoration skipped because input or service state changed."
+                return .posted(note: "Click posted; cursor restoration skipped because input or service state changed.")
             }
             guard let current = CGEvent(source: nil)?.location else {
-                return "Click posted; cannot read cursor position for restoration."
+                return .posted(note: "Click posted; cannot read cursor position for restoration.")
             }
             // A fractional target may be rounded by WindowServer. Real mouse motion
             // still cancels the token even when it falls within this tolerance.
-            if current == cursor { return nil }
+            if current == cursor { return .posted(note: nil) }
             guard CursorRestore.isAtClick(Point(x: current.x, y: current.y), target: final.point) else {
-                return "Click posted; cursor restoration skipped because the pointer is not at the expected click position."
+                return .posted(note: "Click posted; cursor restoration skipped because the pointer is not at the expected click position.")
             }
             do { try live() } catch {
-                return "Click posted; cursor restoration cancelled: \((error as? AppBindError)?.message ?? "state changed")."
+                return .posted(note: "Click posted; cursor restoration cancelled: \((error as? AppBindError)?.message ?? "state changed").")
             }
             guard let restore = CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: cursor, mouseButton: .left) else {
-                return "Click posted; cannot construct cursor restoration event."
+                return .posted(note: "Click posted; cannot construct cursor restoration event.")
             }
             restore.flags = []
             restore.setIntegerValueField(.eventSourceUserData, value: ServiceRuntime.eventTag)
             guard guardState.postIfValid(token, { restore.post(tap: .cghidEventTap) }) else {
-                return "Click posted; cursor restoration cancelled by user input or service stop."
+                return .posted(note: "Click posted; cursor restoration cancelled by user input or service stop.")
             }
             Thread.sleep(forTimeInterval: 0.025)
             guard guardState.valid(token), let restored = CGEvent(source: nil)?.location,
                   CursorRestore.isAtClick(Point(x: restored.x, y: restored.y), target: Point(x: cursor.x, y: cursor.y)) else {
-                return "Click posted; cursor restoration event sent, but return to the original position could not be confirmed."
+                return .posted(note: "Click posted; cursor restoration event sent, but return to the original position could not be confirmed.")
             }
-            return nil
-        } catch { return (error as? AppBindError)?.message ?? "Safety verification failed; execution refused." }
+            return .posted(note: nil)
+        } catch {
+            let failure = (error as? AppBindError) ?? AppBindError("UNSAFE_TARGET", "Safety verification failed; execution refused.")
+            return .refused(code: failure.code, message: failure.message)
+        }
     }
     private static func released(_ keyCode: UInt16) -> Bool {
         guard !CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(keyCode)) else { return false }
@@ -151,6 +161,7 @@ enum SafeClickExecutor {
         }
         guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]], windows.count <= 4096 else { throw refuse("On-screen CG window list is unavailable or over limit.") }
         var snapshots: [WindowSnapshot] = []
+        var owners: [Int: String?] = [:]
         for entry in windows {
             try check()
             guard let bounds = entry[kCGWindowBounds as String] as? [String: Any],
@@ -159,11 +170,17 @@ enum SafeClickExecutor {
                   let windowPID = entry[kCGWindowOwnerPID as String] as? Int,
                   let id = entry[kCGWindowNumber as String] as? Int,
                   let layer = entry[kCGWindowLayer as String] as? Int else { throw refuse("An on-screen CG window has incomplete bounds/ownership metadata.") }
+            // Localized names are diagnostics for the refusal message only; window titles
+            // are never read and an unresolvable pid simply stays unnamed.
+            let owner = owners[windowPID] ?? NSRunningApplication(processIdentifier: pid_t(windowPID))?.localizedName
+            owners[windowPID] = owner
             snapshots.append(WindowSnapshot(id: id, pid: windowPID, layer: layer, alpha: alpha,
-                                            frame: Rect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height)))
+                                            frame: Rect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height),
+                                            owner: owner))
         }
         let number = try WindowIdentity.resolve(pid: Int(pid), frame: frame, point: point,
-                                               triggerID: triggerWindow, axID: axNumber, windows: snapshots)
+                                               triggerID: triggerWindow, axID: axNumber, windows: snapshots,
+                                               ownPID: Int(getpid()))
         guard let current = attribute(app, kAXFocusedWindowAttribute), CFEqual(current, window) else { throw refuse("Focused AX window changed during verification.") }
         try check()
         return Target(window: window, frame: frame, point: point, number: number)
