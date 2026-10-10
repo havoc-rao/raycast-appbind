@@ -6,3 +6,5 @@ raycast/node_modules/
 raycast/.npm-cache/
 raycast/dist/
 raycast/.test-build/
+
+.ref/
