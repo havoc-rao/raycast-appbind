@@ -1,4 +1,5 @@
-import { Action, ActionPanel, Form, Icon, Toast, closeMainWindow, environment, getPreferenceValues, showToast, useNavigation } from "@raycast/api";
+import { execFile } from "node:child_process";
+import { Action, ActionPanel, Form, Icon, PopToRootType, Toast, closeMainWindow, environment, getPreferenceValues, showToast, useNavigation } from "@raycast/api";
 import { useEffect, useRef, useState } from "react";
 import { getFrontmostApplication } from "@raycast/api";
 import { resolveActiveApplication } from "./active-app";
@@ -13,6 +14,22 @@ import { CaptureData, ShortcutData, callHelper } from "./transport";
 export const store = new ConfigStore(environment.supportPath);
 export const message = (e: unknown) => e instanceof Error ? e.message : String(e);
 export async function failure(e: unknown) { await showToast({ style: Toast.Style.Failure, title: "AppBind refused operation", message: message(e) }); }
+
+/** LaunchServices activation: `/usr/bin/open -a Raycast` needs no Automation/Accessibility grant. */
+function execFileAsync(file: string, args: string[], options?: { timeout?: number }): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, options ?? {}, error => (error ? reject(error) : resolve()));
+  });
+}
+
+/** 取点遮罩必须独占键盘，期间 Raycast 面板已关闭；结束后重新激活 Raycast，让表单回到前台继续编辑/保存。失败只记日志，不打断流程。 */
+export async function reopenRaycast(): Promise<void> {
+  try {
+    await execFileAsync("/usr/bin/open", ["-a", "Raycast"], { timeout: 5000 });
+  } catch (e) {
+    await logDebug("pickPoint", `reopen Raycast failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
 interface Values { id: string; name: string; enabled: boolean }
 export function BindingForm({ binding, saved }: { binding?: Binding; saved?: (config: Config) => void }) {
   const { pop, push } = useNavigation(); const [busy, setBusy] = useState(false); const [error, setError] = useState<string>();
@@ -98,6 +115,9 @@ export function BindingForm({ binding, saved }: { binding?: Binding; saved?: (co
     }
     interactiveSession.current = true;
     setCapturing(true);
+    // 面板关闭期间产生的提示（确认/取消/失败）推迟到重新打开面板后再展示，否则用户看不到。
+    let windowClosed = false;
+    let pendingToast: { style: Toast.Style; title: string; message?: string } | undefined;
     try {
       // Precheck while the panel is still visible: a failing helper must produce a visible error.
       const helperPath = getPreferenceValues<{ helperPath: string }>().helperPath;
@@ -106,27 +126,44 @@ export function BindingForm({ binding, saved }: { binding?: Binding; saved?: (co
       await logDebug("pickPoint", `preflight ok=${preflight.ok} trusted=${preflight.ok ? preflight.data.accessibilityTrusted : "n/a"}`);
       if (!preflight.ok || !preflight.data.accessibilityTrusted) {
         await logDebug("pickPoint", "aborted: accessibility not trusted");
-        await failure(new Error("PERMISSION_DENIED: Helper 尚无辅助功能权限。请先在 系统设置 → 隐私与安全性 → 辅助功能 中授权 Helper，再重试。"));
+        pendingToast = { style: Toast.Style.Failure, title: "AppBind refused operation", message: "PERMISSION_DENIED: Helper 尚无辅助功能权限。请先在 系统设置 → 隐私与安全性 → 辅助功能 中授权 Helper，再重试。" };
         return;
       }
       // The picking overlay must become key, so close the Raycast panel first (closeMainWindow exists in @raycast/api 1.104.5 types).
+      // PopToRootType.Suspended keeps the form alive as the view command: without it Raycast applies the
+      // user's "Pop to Root Search" preference and the half-filled form would be popped when the panel reopens.
       await logDebug("pickPoint", "closing main window");
-      await closeMainWindow({ clearRootSearch: true });
+      await closeMainWindow({ clearRootSearch: true, popToRootType: PopToRootType.Suspended });
+      windowClosed = true;
       await logDebug("pickPoint", `calling capture bundleId="${bundleId}" anchor="${anchor}"`);
       const response = await callHelper(helperPath, { protocolVersion: 1, command: "capture", bundleId, anchor });
       if (!response.ok) {
-        await logDebug("pickPoint", `helper failed ${response.error.code}: ${response.error.message}`);
-        await failure(new Error(`${response.error.code}: ${response.error.message}`));
+        await logDebug("pickPoint", `helper ended ${response.error.code}: ${response.error.message}`);
+        if (response.error.code === "USER_CANCELLED") {
+          pendingToast = { style: Toast.Style.Success, title: "取点已取消", message: "表单未修改，可直接重试或继续编辑。" };
+        } else {
+          pendingToast = { style: Toast.Style.Failure, title: "AppBind refused operation", message: `${response.error.code}: ${response.error.message}` };
+        }
         return;
       }
       const d = response.data as unknown as CaptureData; // parseResponse validated the capture success shape for command === "capture"
       await logDebug("pickPoint", `confirmed offset=(${d.offset.x},${d.offset.y}) anchor=${d.anchor} pid=${d.pid}`);
       setAnchor(d.anchor); setX(d.offset.x.toFixed(2)); setY(d.offset.y.toFixed(2));
-      await showToast({ style: Toast.Style.Success, title: "偏移已填入，请保存规则" });
+      pendingToast = { style: Toast.Style.Success, title: "偏移已填入，请保存规则" };
     } catch (e) {
       await logDebug("pickPoint", `exception: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`);
-      await failure(e);
-    } finally { interactiveSession.current = false; setCapturing(false); }
+      pendingToast = { style: Toast.Style.Failure, title: "AppBind refused operation", message: message(e) };
+    } finally {
+      // 取点结束后自动重新打开 Raycast 面板，回到表单继续编辑/保存；稍等面板出现再展示提示。
+      if (windowClosed) {
+        await logDebug("pickPoint", "reopening Raycast");
+        await reopenRaycast();
+        await new Promise(resolve => setTimeout(resolve, 350));
+      }
+      if (pendingToast) await showToast(pendingToast);
+      interactiveSession.current = false;
+      setCapturing(false);
+    }
   }
   async function submit(v: Values) {
     if (busy || interactiveSession.current) return; setBusy(true); setError(undefined);

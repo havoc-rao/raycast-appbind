@@ -385,8 +385,8 @@ README.md                    # 构建、开发、诊断、限制与人工验收
 - 协议：[docs/CONTRACT.md](<CONTRACT.md>)「Capture (point picking overlay)」；capture 仅接受 bundleId+anchor，不带配置与绑定 ID，不接收客户端窗口几何。
 - 交互：Helper 显示多屏消隐遮罩并在目标窗口区域留亮描边；准星与实时锚点/偏移读数跟随指针；Enter 确认、Esc 取消、方向键微调 ±1（Shift ±10）；无点击、无真实光标移动、无其他 App 激活；120 秒无交互超时取消。
 - 确认路径：确认瞬间重读目标 App 聚焦窗口 AX 几何，校验有限值、窗口半开包含与显示器包含，随响应回传 bundleId/pid/frame/anchor/offset/target/durationMs。
-- Raycast：transport 严格校验 capture 请求/响应，capture 使用长超时；创建/编辑表单通过“从窗口取点…”动作调用（先关闭 Raycast 面板），回填锚点与偏移，保存仍由用户显式完成。
+- Raycast：transport 严格校验 capture 请求/响应，capture 使用长超时；创建/编辑表单通过“从窗口取点…”动作调用（先关闭 Raycast 面板，`popToRootType: Suspended` 保留表单为返回视图），回填锚点与偏移，保存仍由用户显式完成；取点结束（确认/取消/失败）后通过 LaunchServices 重新激活 Raycast（`open -a Raycast`）自动重开面板，提示在面板出现后展示。
 - 取消/失败不写回表单；未授权 AX 时返回 PERMISSION_DENIED 且不显示遮罩；目标 App 未运行返回 APP_NOT_RUNNING。
 - 自动验证（2026-09-29）：Swift 核心新增锚点/反向偏移/坐标转换/请求形状测试，Swift 22/22 通过；Raycast 新增 capture 校验与超时策略测试，15/15 通过；根级 smoke 13/13、跨语言对齐 25/25 通过。实测：malformed capture 在任何遮罩出现前被拒绝；合法 capture 在无 AX 权限或目标未运行时快速失败关闭，不阻塞。
-- overlay 键盘/焦点交接、真实 AX 权限下的遮罩显示、Raycast 面板关闭后的焦点回退、多屏混合缩放为待人工验收；取点只写回表单，保存与点击仍由用户显式完成。
+- overlay 键盘/焦点交接、真实 AX 权限下的遮罩显示、取点结束后自动重开 Raycast 面板（`open -a Raycast` 激活 + `popToRootType: Suspended` 保留表单视图）与表单恢复、多屏混合缩放为待人工验收；取点只写回表单，保存与点击仍由用户显式完成。
 
