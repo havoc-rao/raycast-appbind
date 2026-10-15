@@ -4,9 +4,11 @@ Manage app-scoped bindings and an explicitly started native background service. 
 
 ## Development and release
 
-- `npm run dev`: normal Raycast development session, including all debug commands/actions.
-- `npm run build:dev`: development bundles in `dist`, including Helper Status, shortcut probe, dry-run and log viewer.
-- `npm run build` / `npm run build:release`: release bundles in `dist-release`; only Manage Bindings, Create Binding and Background Service are registered.
+Raycast registers a single **APPBIND** command. Open it to select **Manage Bindings**, **Create Binding**, or **Background Service**; Escape returns to the menu. Opening the menu does not query or start the service.
+
+- `npm run dev`: normal Raycast development session; the APPBIND menu also includes Helper Status and the shortcut probe.
+- `npm run build:dev`: development bundles in `dist`, including the diagnostic menu, dry-run and log viewer.
+- `npm run build` / `npm run build:release`: release bundles in `dist-release`; APPBIND contains only the three standard menu items.
 
 Release is built in a temporary isolated staging directory. It excludes debug command sources and debug view implementations, replaces the debug-action module with a null component and the logging module with a no-op, then checks emitted JS/JSON/source maps for debug markers. This is compile-time exclusion, not just hiding actions at runtime. Original development sources and manifest remain unchanged. The dedicated generated release directory is replaced only after a successful build/check. No automatic installation/publication is performed; an existing `ray develop` session remains a dev build.
 

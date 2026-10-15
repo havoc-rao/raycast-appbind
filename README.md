@@ -2,7 +2,7 @@
 
 为每个 App 绑定你的操作。Raycast 管规则，Swift Helper 提供取点、快捷键录制及显式启动的后台服务。
 
-**后台服务运行时，已启用规则可能产生真实点击。保存规则不会自动启动服务。** 使用「AppBind Background Service」查询、启动、停止及重载。没有安装登录项或自动申请系统权限。旧 stdin `execute` 仍拒绝执行；`dry-run` 仍仅算坐标、不点击。后台执行的实际兼容性与权限行为需要人工验收，不能把测试通过视为所有窗口均安全可点。
+**后台服务运行时，已启用规则可能产生真实点击。保存规则不会自动启动服务。** 使用「APPBIND → Background Service」查询、启动、停止及重载。没有安装登录项或自动申请系统权限。旧 stdin `execute` 仍拒绝执行；`dry-run` 仍仅算坐标、不点击。后台执行的实际兼容性与权限行为需要人工验收，不能把测试通过视为所有窗口均安全可点。
 
 ## 设计与工程契约
 
@@ -37,7 +37,7 @@ npm run install:release
 3. 通过 Raycast CLI 将 release 写入当前用户的本机扩展目录，替换同名 AppBind 扩展。
 4. 发送 CLI `build-success` 通知，请 Raycast 重新注册命令列表。仅写入构建文件不足以保证搜索列表更新；通知已发送也不等于 GUI 已确认刷新。
 
-安装后关闭 Raycast 搜索窗口再重新搜索 AppBind，应仅有 **Create Binding、Manage Bindings、AppBind Background Service** 三个命令。不需要再执行 `Import Extension`，也不需要保持开发进程运行。**直接导入原始 `raycast/` 源码目录不是本项目的 release 安装流程**：开发清单仍包含调试命令。
+安装后关闭 Raycast 搜索窗口再重新搜索 AppBind，应仅有 **APPBIND** 一个命令。进入后，二级菜单提供 **Manage Bindings、Create Binding、Background Service**；按 Esc 返回菜单。打开入口不会自动启动服务。不需要再执行 `Import Extension`，也不需要保持开发进程运行。**直接导入原始 `raycast/` 源码目录不是本项目的 release 安装流程**：开发清单仍包含调试命令。
 
 首次安装后，在 AppBind 偏好设置中将 **Absolute Helper Path** 设为本机 Helper 的绝对路径，并按下文完成辅助功能与输入监控授权。该命令**不构建 Helper、不删除规则配置、不授予权限、不启动或重启后台服务，也不发布到 Raycast Store**。
 
@@ -48,7 +48,7 @@ npm run install:release
 | `npm run build:dev` | 只构建含调试功能的版本到 `dist/` |
 | `npm run dev` | 安装/运行开发模式并监听源码变化，保留调试命令 |
 
-**更新**：拉取新源码后重跑 `npm run install:release`；仅扩展 UI 更新无需重启 Helper。若同时重新编译了 Helper，安装完成后在 **AppBind Background Service → Cmd+K → 重启后台服务** 中加载新版程序。“重载已保存的规则”不能替代程序重启。
+**更新**：拉取新源码后重跑 `npm run install:release`；仅扩展 UI 更新无需重启 Helper。若同时重新编译了 Helper，安装完成后在 **APPBIND → Background Service → Cmd+K → 重启后台服务** 中加载新版程序。“重载已保存的规则”不能替代程序重启。
 
 **仍看到调试命令时**：先确认开发监听已停止，再重跑 `npm run install:release`，检查是否报告安装或注册通知失败；关闭搜索窗口重试，必要时退出并重新打开 Raycast。不要通过重新导入原始源码目录来修复 release 命令列表，也不要删除规则数据。
 
@@ -77,15 +77,15 @@ npm run install:release
    npm run build
    ```
 
-   `npm ci --ignore-scripts --cache .npm-cache` 按 `package-lock.json` 安装依赖，`--ignore-scripts` 跳过可选 React DevTools 的 Electron 下载器（编译与测试不需要，见「环境限制」）。`npm run build`（即 `build:release`）产出 **release 构建**到 `dist-release/`，只含 Manage Bindings / Create Binding / Background Service 三个正式命令，排除 Helper Status 等调试入口（见 [扩展构建说明](<raycast/README.md>)）；`npm run build:dev` 产出调试构建到 `dist/`（多出的命令仅用于排障）。两者都只写工作区内的构建目录，不安装、不改动 Raycast。
+   `npm ci --ignore-scripts --cache .npm-cache` 按 `package-lock.json` 安装依赖，`--ignore-scripts` 跳过可选 React DevTools 的 Electron 下载器（编译与测试不需要，见「环境限制」）。`npm run build`（即 `build:release`）产出 **release 构建**到 `dist-release/`，只注册 APPBIND 一个命令，内含 Manage Bindings / Create Binding / Background Service 三个二级功能，排除 Helper Status 等调试入口（见 [扩展构建说明](<raycast/README.md>)）；`npm run build:dev` 产出调试构建到 `dist/`（多出的命令仅用于排障）。两者都只写工作区内的构建目录，不安装、不改动 Raycast。
 5. **安装 Release 到 Raycast**：保持 Raycast 运行，在 `raycast/` 目录执行 `npm run install:release`（完整说明见上方「本机安装 Release」）。它会再次构建 release、安装到当前这台 Mac，并通知 Raycast 更新命令列表。**不再执行 Import Extension 导入原始源码目录**，否则可能重新注册开发清单中的调试命令。安装后打开 **AppBind 扩展偏好设置**，将 **Absolute Helper Path**（`helperPath`）填为第 3 步产物的绝对路径，例如 `/Users/你/AppBind/helper/.build/debug/appbind-helper`；只填路径，不接受 shell 命令。日常使用不需要 `npm run dev` 保持运行。
 6. **授权**：在 **系统设置 → 隐私与安全性** 中把以下两项授权给**同一个 Helper 二进制**（第 5 步填的那个绝对路径；Helper 与扩展都不主动弹授权框，启动缺权限时只保持运行但不执行，见 [SERVICE.md](<helper/SERVICE.md>)；首次操作时若系统弹窗询问，允许即可）：
    - **辅助功能**（Accessibility）：取点、窗口安全校验与真实点击需要；
    - **输入监控**（Input Monitoring）：后台服务监听快捷键需要。
    授权按授权时刻的二进制路径记录：重新编译、清理 `.build` 或移动源码目录导致路径变化时，授权可能失效，需要重新添加并重启服务（授权归属与重编译后的权限持久性尚未实测，见「人工验收（待执行）」第 2 条）。
-7. **首次使用**：打开 **AppBind Background Service**，查看权限与运行状态；点击 **启动后台服务** 并确认提示，状态出现「正在运行」「监听与执行就绪」即生效。切回目标 App 按下并松开绑定组合键；窗口身份、遮挡、位置或用户输入变化时会拒绝执行，此时屏幕底部会短暂显示一条 Raycast HUD 风格的提示（毛玻璃胶囊，约 2.5 秒，不夺焦点），同一原因也会记录到「最近错误」。**停止后台服务**结束监听；不会自动添加登录项。
+7. **首次使用**：打开 **APPBIND → Background Service**，查看权限与运行状态；点击 **启动后台服务** 并确认提示，状态出现「正在运行」「监听与执行就绪」即生效。切回目标 App 按下并松开绑定组合键；窗口身份、遮挡、位置或用户输入变化时会拒绝执行，此时屏幕底部会短暂显示一条 Raycast HUD 风格的提示（毛玻璃胶囊，约 2.5 秒，不夺焦点），同一原因也会记录到「最近错误」。**停止后台服务**结束监听；不会自动添加登录项。
 
-**更新**：对方拿到新源码后（`git pull` 或解压新 ZIP）：如 Helper 有更新，重新构建 Helper（第 3 步）→ 在 `raycast/` 执行 `npm run install:release` → 若已重新编译 Helper，在 **AppBind Background Service** 中点击 **重启后台服务**。不需要再次 Import Extension。注意：**重载已保存的规则**只刷新配置，不更新运行中的程序；权限异常时按第 6 步重新授权。
+**更新**：对方拿到新源码后（`git pull` 或解压新 ZIP）：如 Helper 有更新，重新构建 Helper（第 3 步）→ 在 `raycast/` 执行 `npm run install:release` → 若已重新编译 Helper，在 **APPBIND → Background Service** 中点击 **重启后台服务**。不需要再次 Import Extension。注意：**重载已保存的规则**只刷新配置，不更新运行中的程序；权限异常时按第 6 步重新授权。
 
 **数据说明**：规则保存在 Raycast 为各扩展分配的支持目录中（代码里的 `environment.supportPath/config.json`，见 [storage.ts](<raycast/src/storage.ts>) 与 [service.ts](<raycast/src/service.ts>)）。数据只在本机，**不随源码分发，也不跨机器同步**：新 Mac 导入后是空配置，需要重新创建规则；更新源码不会删除本机已有规则（配置与源码目录分离）。
 
@@ -121,7 +121,7 @@ node -e 'const fs=require("node:fs"); console.log(JSON.stringify({protocolVersio
 ## 后台服务
 
 1. 先创建并保存规则，核对目标 App、快捷键和点位。保存时明确显示是否已加载到服务。
-2. 打开 **AppBind Background Service**，查看辅助功能和输入监控权限；自行在系统设置中授予当前 Helper 所需权限。
+2. 打开 **APPBIND → Background Service**，查看辅助功能和输入监控权限；自行在系统设置中授予当前 Helper 所需权限。
 3. 点击 **启动后台服务**并确认真实点击提示。查看「正在运行」「监听与执行就绪」状态。
 4. 切回目标 App，按下并松开绑定组合键；窗口身份、遮挡、位置或用户输入发生变化时会拒绝执行，此时屏幕底部会短暂显示一条 Raycast HUD 风格的提示（毛玻璃胶囊、左侧图标方块、非激活、不接收鼠标），同一原因也会写入最近错误，供事后在面板里查看。
 5. 使用 **停止后台服务**结束监听。不会自动添加登录项。重新编译 Helper 后建议先停止再启动，并核验权限。

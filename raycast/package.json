@@ -3,11 +3,7 @@
   "name": "appbind", "title": "AppBind", "description": "Manage app-aware bindings, diagnostics, and an explicitly started background execution service.",
   "icon": "appbind.png", "author": "appbind", "license": "MIT", "platforms": ["macOS"], "categories": ["Productivity", "Developer Tools"],
   "commands": [
-    {"name": "manage-bindings", "title": "Manage Bindings", "description": "Manage bindings, reload running service, and run no-click diagnostics", "mode": "view"},
-    {"name": "create-binding", "title": "Create Binding", "description": "Save an app-scoped binding and synchronize an already running service", "mode": "view"},
-    {"name": "shortcut-probe", "title": "Test Native Shortcut Recording", "description": "Experimental Raycast Action shortcut capture; no helper or config writes", "mode": "view"},
-    {"name": "background-service", "title": "AppBind Background Service", "description": "Explicitly start, stop, and inspect app-scoped shortcut execution", "mode": "view"},
-    {"name": "helper-status", "title": "Helper Status", "description": "Inspect helper availability and no-click diagnostics", "mode": "view"}
+    {"name": "appbind", "title": "APPBIND", "description": "Open binding management, creation, background service, and diagnostics", "mode": "view"}
   ],
   "preferences": [{"name": "helperPath", "type": "textfield", "required": true, "title": "Absolute Helper Path", "description": "Explicit absolute path to your built AppBindHelper executable; never a shell command."}],
   "scripts": {"dev": "ray develop", "build": "npm run build:release", "build:release": "node scripts/build-release.mjs", "install:release": "node scripts/build-release.mjs --install", "build:dev": "ray build -e dist -o dist", "typecheck": "tsc --noEmit", "test": "tsx --test tests/*.test.ts"},

@@ -7,7 +7,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // Stage in a separate directory: never rewrite the live development manifest/source.
 await mkdir(join(root, ".release-build"), { recursive: true });
 const stage = await mkdtemp(join(root, ".release-build/stage-"));
-const excluded = new Set(["shortcut-probe.tsx", "shortcut-probe-model.ts", "helper-status.tsx", "debug-ui.tsx", "debug-actions.tsx", "debug-log.ts"]);
+const excluded = new Set(["shortcut-probe.tsx", "shortcut-probe-model.ts", "helper-status.tsx", "debug-ui.tsx", "debug-actions.tsx", "debug-log.ts", "debug-menu.tsx"]);
 try {
   await mkdir(join(stage, "src"));
   for (const file of await readdir(join(root, "src"))) {
@@ -18,9 +18,9 @@ try {
   await writeFile(join(stage, "src/debug-actions.tsx"), 'import type { Config } from "./config";\nexport function BindingDebugActions(_props: { config: Config; bindingId: string }) { return null; }\n');
   await writeFile(join(stage, "src/debug-log.ts"), 'export async function logDebug(_area: string, _message: string): Promise<void> {}\n');
   const manifest = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
-  manifest.commands = manifest.commands.filter(command => !["shortcut-probe", "helper-status"].includes(command.name));
+  await writeFile(join(stage, "src/debug-menu.tsx"), 'export function DebugMenu() { return null; }\n');
   manifest.description = "Manage app-aware bindings and an explicitly started background execution service.";
-  manifest.commands.find(c => c.name === "manage-bindings").description = "Create, edit, enable and delete app-aware bindings";
+  manifest.commands.find(c => c.name === "appbind").description = "Open binding management, creation, and background service";
   await writeFile(join(stage, "package.json"), JSON.stringify(manifest, null, 2) + "\n");
   for (const file of ["tsconfig.json", "raycast-env.d.ts", "README.md", "assets"]) {
     await cp(join(root, file), join(stage, file), { recursive: true });
@@ -47,7 +47,7 @@ try {
   // Replace only dedicated generated release output after successful build/check.
   await rm(join(root, "dist-release"), { recursive: true, force: true });
   await cp(output, join(root, "dist-release"), { recursive: true });
-  console.log("Release verified: manage-bindings, create-binding, background-service only; debug entry points and UI/log implementations excluded.");
+  console.log("Release verified: APPBIND entry with binding management, creation, and background service; debug entry points and UI/log implementations excluded.");
   if (process.argv.includes("--install")) {
     // With no output override, the Raycast CLI targets its local extension directory.
     const install = spawnSync(join(root, "node_modules/.bin/ray"), ["build", "-e", "dist"], { cwd: stage, stdio: "inherit" });
@@ -60,7 +60,7 @@ try {
     const refresh = spawnSync("/usr/bin/open", ["-g", refreshURL], { stdio: "inherit" });
     if (refresh.error) throw refresh.error;
     if (refresh.status !== 0) throw new Error("Release files installed, but Raycast registration notification failed.");
-    console.log("Release files installed; command re-registration requested from Raycast. Verify the three commands in Raycast. Stop any ray develop watcher to prevent overwrite.");
+    console.log("Release files installed; command re-registration requested from Raycast. Verify the single APPBIND command and its three menu items in Raycast. Stop any ray develop watcher to prevent overwrite.");
   }
 } finally {
   await rm(stage, { recursive: true, force: true });
